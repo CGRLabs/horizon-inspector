@@ -36,9 +36,17 @@ Independent package inspection, validation, and security analysis engine for the
 
 ---
 
-## 2. CLI Usage
+## 2. Install
 
-Binary: `horizon-inspect`
+```sh
+git clone https://github.com/CGRLabs/horizon-inspector.git
+cd horizon-inspector
+cargo build --release
+```
+
+Binary: `horizon-inspect` (at `target/release/horizon-inspect`)
+
+## 3. CLI Usage
 
 ```bash
 # Basic inspection of any supported package
@@ -79,7 +87,31 @@ horizon-inspect <file> --kind content-mod
 
 ---
 
-## 3. Library Usage
+## 4. AI Agent Usage
+
+This CLI is designed to be easy for AI agents to call programmatically:
+
+- All commands return clear exit codes (`0` = valid, `1` = validation failure, `2` = tool error)
+- Use `--json` for machine-readable output from `inspect`
+- Exit codes make it easy to gate CI pipelines or agent workflows
+
+Example AI agent workflow:
+
+```sh
+# 1. Inspect a mod package
+horizon-inspect some_mod.hmod --json > inspection.json
+
+# 2. Check exit code
+if [ $? -eq 0 ]; then
+  echo "Mod passed inspection"
+else
+  echo "Mod failed inspection"
+fi
+```
+
+---
+
+## 5. Library Usage
 
 Add `horizon-inspector` as a dependency in your Rust backend or CLI project:
 
