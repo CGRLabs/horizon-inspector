@@ -1,0 +1,28 @@
+[package]
+name = "horizon-inspector"
+version = "0.1.0"
+edition = "2021"
+description = "Inspection, validation, and security analysis engine for Horizon mod packages"
+authors = ["CGRLabs"]
+license = "MIT"
+
+[lib]
+name = "horizon_inspector"
+path = "src/lib.rs"
+
+[[bin]]
+name = "horizon-inspect"
+path = "src/bin/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1.6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+minisign-verify = "0.3"
+horizon-mods = { path = "../../repositories/horizon/crates/horizon-mods", features = ["index"] }
+horizon-shader-api = { path = "../../repositories/horizon/crates/horizon-shader-api" }
+
+[dev-dependencies]
+tempfile = "3"
