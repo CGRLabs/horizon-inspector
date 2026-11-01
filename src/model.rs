@@ -1,6 +1,7 @@
 //! Data models and schemas for the Horizon Mod Inspector.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 
 /// Recognized package kinds in the Horizon ecosystem.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -435,4 +436,213 @@ impl InspectionReport {
         out.push_str("================================================================================\n");
         out
     }
+
+    /// Renders the report as a self-contained HTML document with inline CSS,
+    /// status badges, and a color-coded diagnostics table. Suitable for printing
+    /// to PDF via the browser ("Print to PDF").
+    pub fn to_html(&self) -> String {
+        let mut out = String::new();
+
+        let status_str = if self.is_valid {
+            if self.stats.warning_count > 0 {
+                "PASSED WITH WARNINGS"
+            } else {
+                "PASSED (VALID)"
+            }
+        } else {
+            "FAILED (INVALID)"
+        };
+        let status_class = if self.is_valid { "status-valid" } else { "status-invalid" };
+        let size_kib = self.file.size_bytes as f64 / 1024.0;
+        let file_name = escape_html(&self.file.file_name);
+        let file_path = escape_html(&self.file.file_path);
+        let sha256 = escape_html(&self.file.sha256);
+
+        let _ = writeln!(out, "<!DOCTYPE html>");
+        let _ = writeln!(out, "<html lang=\"en\">");
+        let _ = writeln!(out, "<head>");
+        let _ = writeln!(out, "<meta charset=\"utf-8\">");
+        let _ = writeln!(out, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        let _ = writeln!(out, "<title>Horizon Mod Inspector Report</title>");
+        let _ = writeln!(out, "<style>");
+        let _ = writeln!(out, "body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 24px; color: #1f2937; background: #f9fafb; }}");
+        let _ = writeln!(out, ".wrap {{ max-width: 980px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}");
+        let _ = writeln!(out, "h1 {{ font-size: 20px; margin: 0 0 8px 0; color: #111827; }}");
+        let _ = writeln!(out, ".subtitle {{ color: #6b7280; font-size: 13px; margin-bottom: 20px; }}");
+        let _ = writeln!(out, "h2 {{ font-size: 15px; margin: 22px 0 8px 0; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }}");
+        let _ = writeln!(out, "table {{ width: 100%; border-collapse: collapse; margin: 10px 0 18px 0; }}");
+        let _ = writeln!(out, "th, td {{ text-align: left; padding: 7px 10px; border: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; }}");
+        let _ = writeln!(out, "th {{ background: #f3f4f6; color: #374151; font-weight: 600; white-space: nowrap; }}");
+        let _ = writeln!(out, "tr:nth-child(even) td {{ background: #fafafa; }}");
+        let _ = writeln!(out, ".badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }}");
+        let _ = writeln!(out, ".badge-valid {{ background: #dcfce7; color: #166534; }}");
+        let _ = writeln!(out, ".badge-warn {{ background: #fef9c3; color: #713f12; }}");
+        let _ = writeln!(out, ".badge-invalid {{ background: #fee2e2; color: #991b1b; }}");
+        let _ = writeln!(out, ".sev-error {{ color: #991b1b; font-weight: 600; }}");
+        let _ = writeln!(out, ".sev-warning {{ color: #713f12; font-weight: 600; }}");
+        let _ = writeln!(out, ".sev-info {{ color: #1d4ed8; font-weight: 600; }}");
+        let _ = writeln!(out, ".mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}");
+        let _ = writeln!(out, ".footer {{ margin-top: 26px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 12px; }}");
+        let _ = writeln!(out, ".empty {{ color: #9ca3af; font-style: italic; }}");
+        let _ = writeln!(out, "</style>");
+        let _ = writeln!(out, "</head>");
+        let _ = writeln!(out, "<body>");
+        let _ = writeln!(out, "<div class=\"wrap\">");
+
+        // Header / status
+        let _ = writeln!(out, "<h1>Horizon Mod Inspector Report</h1>");
+        let _ = writeln!(out, "<p class=\"subtitle\">Schema version: {} · Inspected at report generation</p>", escape_html(&self.schema_version));
+        let _ = writeln!(out, "<div class=\"badge {}\">{}</div>", status_class, status_str);
+        let _ = writeln!(out, "<p class=\"subtitle\">Diagnostics — {} error(s), {} warning(s), {} info item(s)</p>", self.stats.error_count, self.stats.warning_count, self.stats.info_count);
+
+        // File info
+        let _ = writeln!(out, "<h2>Package</h2>");
+        let _ = writeln!(out, "<table>");
+        let _ = writeln!(out, "<tr><th>File</th><td class=\"mono\">{}</td></tr>", file_name);
+        let _ = writeln!(out, "<tr><th>Path</th><td class=\"mono\">{}</td></tr>", file_path);
+        let _ = writeln!(out, "<tr><th>Type</th><td>{}</td></tr>", self.package_kind.display_name());
+        let _ = writeln!(out, "<tr><th>Security Tier</th><td>{}</td></tr>", self.security_tier.description());
+        let _ = writeln!(out, "<tr><th>Size</th><td>{} bytes ({:.2} KiB)</td></tr>", self.file.size_bytes, size_kib);
+        let _ = writeln!(out, "<tr><th>SHA-256</th><td class=\"mono\">{}</td></tr>", sha256);
+        let _ = writeln!(out, "</table>");
+
+        // Identity
+        let _ = writeln!(out, "<h2>Identity</h2>");
+        let _ = writeln!(out, "<table>");
+        let _ = writeln!(out, "<tr><th>ID</th><td>{}</td></tr>", escape_html(self.identity.id.as_deref().unwrap_or("<none>")));
+        let _ = writeln!(out, "<tr><th>Name</th><td>{}</td></tr>", escape_html(self.identity.name.as_deref().unwrap_or("<none>")));
+        let _ = writeln!(out, "<tr><th>Version</th><td>{}</td></tr>", escape_html(self.identity.version.as_deref().unwrap_or("<none>")));
+        if let Some(desc) = &self.identity.description {
+            if !desc.is_empty() {
+                let _ = writeln!(out, "<tr><th>Description</th><td>{}</td></tr>", escape_html(desc));
+            }
+        }
+        if !self.identity.authors.is_empty() {
+            let _ = writeln!(out, "<tr><th>Authors</th><td>{}</td></tr>", escape_html(&self.identity.authors.join(", ")));
+        }
+        if let Some(lic) = &self.identity.license {
+            let _ = writeln!(out, "<tr><th>License</th><td>{}</td></tr>", escape_html(lic));
+        }
+        let _ = writeln!(out, "</table>");
+
+        // Compatibility
+        let _ = writeln!(out, "<h2>Compatibility</h2>");
+        let _ = writeln!(out, "<table>");
+        if let Some(game) = &self.compatibility.game {
+            let _ = writeln!(out, "<tr><th>Target Game</th><td>Minecraft Java {}</td></tr>", escape_html(game));
+        }
+        if let Some(api) = &self.compatibility.api {
+            let _ = writeln!(out, "<tr><th>API Line</th><td>{}</td></tr>", escape_html(api));
+        }
+        if let Some(level) = self.compatibility.api_level {
+            let _ = writeln!(out, "<tr><th>API Level</th><td>{}</td></tr>", level);
+        }
+        if let Some(side) = &self.compatibility.side {
+            let _ = writeln!(out, "<tr><th>Side</th><td>{}</td></tr>", escape_html(side));
+        }
+        if let Some(rev) = &self.compatibility.horizon_revision {
+            let _ = writeln!(out, "<tr><th>Horizon Commit</th><td class=\"mono\">{}</td></tr>", escape_html(rev));
+        }
+        if let Some(rev) = &self.compatibility.mixins_revision {
+            let _ = writeln!(out, "<tr><th>Mixins Commit</th><td class=\"mono\">{}</td></tr>", escape_html(rev));
+        }
+        if let Some(hooks) = self.compatibility.hooks_api {
+            let _ = writeln!(out, "<tr><th>Hooks API Level</th><td>{}</td></tr>", hooks);
+        }
+        let _ = writeln!(out, "</table>");
+
+        // Capabilities
+        if !self.capabilities.is_empty() {
+            let _ = writeln!(out, "<h2>Declared Capabilities</h2>");
+            let _ = writeln!(out, "<table>");
+            for cap in &self.capabilities {
+                let _ = writeln!(out, "<tr><td>{}</td></tr>", escape_html(cap));
+            }
+            let _ = writeln!(out, "</table>");
+        }
+
+        // Dependencies
+        if !self.dependencies.is_empty() {
+            let _ = writeln!(out, "<h2>Package Dependencies</h2>");
+            let _ = writeln!(out, "<table>");
+            let _ = writeln!(out, "<tr><th>ID</th><th>Version</th><th>SHA-256</th><th>Enabled</th></tr>");
+            for dep in &self.dependencies {
+                let hash = &dep.sha256[..12.min(dep.sha256.len())];
+                let _ = writeln!(out, "<tr><td>{}</td><td>{}</td><td class=\"mono\">{}</td><td>{}</td></tr>", escape_html(&dep.id), escape_html(&dep.version), escape_html(hash), dep.enabled);
+            }
+            let _ = writeln!(out, "</table>");
+        }
+
+        // Signature
+        let _ = writeln!(out, "<h2>Signature</h2>");
+        let _ = writeln!(out, "<table>");
+        match &self.signature {
+            SignatureInfo::Verified { public_key } => {
+                let _ = writeln!(out, "<tr><th>Status</th><td>Verified with key <span class=\"mono\">{}</span></td></tr>", escape_html(public_key));
+            }
+            SignatureInfo::Unsigned => {
+                let _ = writeln!(out, "<tr><th>Status</th><td>Unsigned</td></tr>");
+            }
+            SignatureInfo::SignatureMissing { .. } => {
+                let _ = writeln!(out, "<tr><th>Status</th><td>Key provided but package has no signature</td></tr>");
+            }
+            SignatureInfo::KeyMissing { signature_path } => {
+                let _ = writeln!(out, "<tr><th>Status</th><td>Signature present (<span class=\"mono\">{}</span>) but no public key provided</td></tr>", escape_html(signature_path));
+            }
+            SignatureInfo::Invalid { reason } => {
+                let _ = writeln!(out, "<tr><th>Status</th><td class=\"sev-error\">INVALID SIGNATURE: {}</td></tr>", escape_html(reason));
+            }
+        }
+        let _ = writeln!(out, "</table>");
+
+        // Diagnostics
+        let _ = writeln!(out, "<h2>Diagnostics</h2>");
+        let _ = writeln!(out, "<p>Total: {} error(s), {} warning(s), {} info item(s)</p>", self.stats.error_count, self.stats.warning_count, self.stats.info_count);
+        if self.diagnostics.is_empty() {
+            let _ = writeln!(out, "<p class=\"empty\">No diagnostics.</p>");
+        } else {
+            let _ = writeln!(out, "<table>");
+            let _ = writeln!(out, "<tr><th>Severity</th><th>Code</th><th>Message</th><th>Target</th><th>Recommendation</th></tr>");
+            for diag in &self.diagnostics {
+                let sev_class = match diag.severity {
+                    Severity::Error => "sev-error",
+                    Severity::Warning => "sev-warning",
+                    Severity::Info => "sev-info",
+                };
+                let sev_label = diag.severity.badge();
+                let _ = writeln!(out, "<tr><td class=\"{}\">{}</td><td class=\"mono\">{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    sev_class, escape_html(sev_label), escape_html(&diag.code), escape_html(&diag.message),
+                    escape_html(diag.target.as_deref().unwrap_or("")),
+                    escape_html(diag.recommendation.as_deref().unwrap_or(""))
+                );
+            }
+            let _ = writeln!(out, "</table>");
+        }
+
+        let _ = writeln!(out, "<div class=\"footer\">Generated by Horizon Mod Inspector. HTML report — use your browser's \"Print to PDF\" to produce a PDF.</div>");
+        let _ = writeln!(out, "</div>");
+        let _ = writeln!(out, "</body>");
+        let _ = writeln!(out, "</html>");
+
+        out
+    }
+
+    /// Pretty-printed JSON serialization of the report (alias for [`to_json`]).
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        self.to_json()
+    }
+
+    /// Human-readable terminal rendering of the report (alias for [`to_terminal_text`]).
+    pub fn to_text(&self) -> String {
+        self.to_terminal_text()
+    }
+}
+
+/// Escape HTML special characters so report content is safe to embed in HTML.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }

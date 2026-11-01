@@ -1,7 +1,7 @@
 //! CLI frontend for the Horizon Mod Inspector (`horizon-inspect`).
 
 use horizon_inspector::{
-    InspectorConfig, PackageKind, inspect_package,
+    InspectionReport, InspectorConfig, PackageKind, inspect_package,
 };
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -34,6 +34,8 @@ OPTIONS:
     --strict                        Treat warnings as validation errors (non-zero exit)
     --revocation-list <PATH>        Check against a local revoked.toml
     -q, --quiet                     Suppress diagnostic output if package is valid
+    --export <PATH>                 Write the report to a file. Format is derived from the
+                                    extension: .html, .json, .txt (default: .json).
     -h, --help                      Print this help guide
     -v, --version                   Print version information
 
@@ -66,6 +68,7 @@ fn main() -> ExitCode {
     let mut json_output = false;
     let mut strict_mode = false;
     let mut quiet_mode = false;
+    let mut export_path: Option<String> = None;
     let mut config = InspectorConfig::default();
 
     let mut i = 0;
@@ -217,6 +220,14 @@ fn main() -> ExitCode {
             "--quiet" | "-q" => {
                 quiet_mode = true;
             }
+            "--export" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --export requires a file path");
+                    return ExitCode::from(2);
+                }
+                export_path = Some(args[i].clone());
+            }
             other if !other.starts_with('-') => {
                 if target_file.is_some() {
                     eprintln!("error: multiple target files specified ('{}' and '{other}')", target_file.unwrap());
@@ -262,6 +273,14 @@ fn main() -> ExitCode {
         print!("{}", report.to_terminal_text());
     }
 
+    // Optional file export. Format is derived from the extension; defaults to JSON.
+    if let Some(ref path) = export_path {
+        if let Err(e) = write_export(path, &report) {
+            eprintln!("error: failed to write export to '{path}': {e}");
+            return ExitCode::from(2);
+        }
+    }
+
     if !report.is_valid {
         ExitCode::from(1)
     } else if strict_mode && report.stats.warning_count > 0 {
@@ -270,4 +289,30 @@ fn main() -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Serialize `report` to `path`, choosing the format from the file extension.
+/// `.html` produces an HTML report, `.txt` produces the terminal rendering,
+/// and anything else (including no extension) defaults to pretty JSON.
+fn write_export(path: &str, report: &InspectionReport) -> Result<(), std::io::Error> {
+    let path_buf = Path::new(path);
+    let ext = path_buf.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+    let content = match ext.to_ascii_lowercase().as_str() {
+        "html" => report.to_html(),
+        "txt" => report.to_text(),
+        _ => match report.to_json_pretty() {
+            Ok(json) => json,
+            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        },
+    };
+
+    // Create parent directories if needed so the export is drag-and-drop friendly.
+    if let Some(parent) = path_buf.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| e)?;
+        }
+    }
+    std::fs::write(path, content).map_err(|e| e)?;
+    Ok(())
 }
