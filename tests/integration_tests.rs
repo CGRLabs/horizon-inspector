@@ -41,6 +41,23 @@ fn fastrand_u32() -> u32 {
     nanos
 }
 
+/// Helper to create an unpacked mod directory that persists after the test.
+fn create_test_dir(entries: &[(&str, &[u8])]) -> PathBuf {
+    let target = std::env::temp_dir().join(format!(
+        "horizon_test_dir_{}_{}",
+        std::process::id(),
+        fastrand_u32()
+    ));
+    for (name, content) in entries {
+        let path = target.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+    target
+}
+
 // -----------------------------------------------------------------------------
 // 1. Existing sample fixtures test
 // -----------------------------------------------------------------------------
@@ -154,6 +171,69 @@ mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
         Some("0b14f8acfd97fa2c750e42795249dcc981178ca4")
     );
     assert_eq!(report.identity.id.as_deref(), Some("native_demo"));
+}
+
+#[test]
+fn test_inspect_current_wasm_directory_accepted() {
+    let manifest = r#"
+id = "wasm_dir"
+name = "Wasm Directory"
+version = "1.0.0"
+description = "A current sandboxed code mod workspace"
+authors = ["CGRLabs"]
+api = "0.2"
+capabilities = ["registries"]
+
+[wasm]
+sha512 = "00"
+toolchain = "1.99.1"
+"#;
+    let path = create_test_dir(&[
+        ("horizon-mod.toml", manifest.as_bytes()),
+        ("mod.wasm", b"wasm"),
+    ]);
+    let report = inspect_package(&path, &InspectorConfig::default());
+
+    assert_eq!(report.package_kind, PackageKind::ContentMod);
+    assert_eq!(report.security_tier, SecurityTier::SandboxedWasm);
+    assert!(report.is_valid, "current wasm directory must pass: {:?}", report.diagnostics);
+    assert!(report.diagnostics.iter().any(|d| d.code == DiagnosticCode::MOD_WASM_CODE));
+    assert!(!report.diagnostics.iter().any(|d| d.code == DiagnosticCode::MANIFEST_SYNTAX_ERROR));
+    std::fs::remove_dir_all(&path).ok();
+}
+
+#[test]
+fn test_inspect_current_native_directory_accepted() {
+    let manifest = r#"
+id = "native_dir"
+name = "Native Directory"
+version = "1.0.0"
+description = "A current native source mod workspace"
+authors = ["CGRLabs"]
+api = "0.2"
+side = "client"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
+"#;
+    let path = create_test_dir(&[
+        ("horizon-mod.toml", manifest.as_bytes()),
+        ("src/lib.rs", b"fn main() {}"),
+    ]);
+    let report = inspect_package(&path, &InspectorConfig::default());
+
+    assert_eq!(report.package_kind, PackageKind::ContentMod);
+    assert_eq!(report.security_tier, SecurityTier::UnsandboxedNative);
+    assert!(report.is_valid, "current native directory must pass: {:?}", report.diagnostics);
+    assert!(report.diagnostics.iter().any(|d| d.code == DiagnosticCode::MOD_NATIVE_CODE));
+    assert_eq!(
+        report.compatibility.horizon_revision.as_deref(),
+        Some("0b14f8acfd97fa2c750e42795249dcc981178ca4")
+    );
+    std::fs::remove_dir_all(&path).ok();
 }
 
 // -----------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 //! so developers can validate a mod before packaging it.
 
 use crate::error::DiagnosticCode;
-use crate::model::InspectionReport;
+use crate::model::{InspectionReport, SecurityTier};
 
 use horizon_mods::index::native::Manifest as NativeManifest;
 use horizon_mods::index::valid_id;
@@ -58,6 +58,40 @@ fn inspect_content_dir(path: &Path, report: &mut InspectionReport) {
             return;
         }
     };
+    let manifest_value = match toml::from_str::<toml::Value>(&manifest_text) {
+        Ok(v) => v,
+        Err(e) => {
+            report.add_error(DiagnosticCode::MANIFEST_SYNTAX_ERROR, format!("Failed to parse {CONTENT_MANIFEST}: {e}"), Some(CONTENT_MANIFEST.to_string()), None);
+            return;
+        }
+    };
+    let has_wasm_table = manifest_value.get("wasm").is_some();
+    let has_native_table = manifest_value.get("native").is_some();
+    let has_wasm_binary = path.join("mod.wasm").is_file();
+
+    if has_wasm_binary && !has_wasm_table {
+        report.add_error(
+            DiagnosticCode::SEC_WASM_DISALLOWED,
+            "Directory contains a legacy 'mod.wasm' without a [wasm] manifest table. Current WebAssembly mods must declare [wasm].".to_string(),
+            Some("mod.wasm".to_string()),
+            Some("Rebuild with cargo horizon-mod build --wasm on the current SDK".to_string()),
+        );
+        return;
+    }
+    if has_wasm_table && has_native_table {
+        report.add_error(
+            DiagnosticCode::MANIFEST_INVALID_SCHEMA,
+            "Manifest declares both [wasm] and [native]; a project may carry only one code kind".to_string(),
+            Some(CONTENT_MANIFEST.to_string()),
+            Some("Remove one of the two tables".to_string()),
+        );
+        return;
+    }
+    if has_wasm_table || has_native_table {
+        inspect_code_dir(path, &manifest_value, report, has_wasm_table);
+        return;
+    }
+
     let manifest = match horizon_mods::Manifest::parse(&manifest_text) {
         Ok(m) => m,
         Err(e) => {
@@ -105,6 +139,99 @@ fn inspect_content_dir(path: &Path, report: &mut InspectionReport) {
     }
     if manifest.authors.is_empty() {
         report.add_warning(DiagnosticCode::QUALITY_MISSING_AUTHORS, "No authors listed".to_string(), Some(CONTENT_MANIFEST.to_string()), None);
+    }
+}
+
+fn str_field(value: &toml::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn string_array(value: &toml::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// Inspect an unpacked current-format code mod directory.
+///
+/// The engine's strict `horizon_mods::Manifest` parser predates `[wasm]` and
+/// `[native]`, so code projects are read directly from the TOML value.
+fn inspect_code_dir(path: &Path, value: &toml::Value, report: &mut InspectionReport, is_wasm: bool) {
+    let id = str_field(value, "id").unwrap_or_default();
+    let name = str_field(value, "name").unwrap_or_default();
+    let version = str_field(value, "version").unwrap_or_default();
+    let description = str_field(value, "description").filter(|s| !s.is_empty());
+    let authors = string_array(value, "authors");
+
+    report.identity.id = (!id.is_empty()).then_some(id.clone());
+    report.identity.name = (!name.is_empty()).then_some(name);
+    report.identity.version = (!version.is_empty()).then_some(version);
+    report.identity.description = description.clone();
+    report.identity.authors = authors.clone();
+    report.compatibility.api = str_field(value, "api");
+    report.compatibility.side = Some(str_field(value, "side").unwrap_or_else(|| "both".to_string()));
+    report.capabilities = string_array(value, "capabilities");
+
+    if !valid_id(&id) {
+        report.add_error(DiagnosticCode::MANIFEST_INVALID_ID, format!("Mod ID '{id}' is invalid: must match [a-z0-9_]{{1,64}}"), Some(CONTENT_MANIFEST.to_string()), Some("Use only lowercase alphanumeric characters and underscores (1-64 characters)".to_string()));
+    }
+
+    if is_wasm {
+        report.security_tier = SecurityTier::SandboxedWasm;
+        report.add_info(
+            DiagnosticCode::MOD_WASM_CODE,
+            "WebAssembly code mod: executable wasm runs inside Horizon's sandbox".to_string(),
+            Some("mod.wasm".to_string()),
+            None,
+        );
+        if !path.join("mod.wasm").is_file() {
+            report.add_error(
+                DiagnosticCode::MANIFEST_INVALID_SCHEMA,
+                "Manifest declares [wasm] but the directory has no mod.wasm".to_string(),
+                Some("mod.wasm".to_string()),
+                Some("Run cargo horizon-mod build --wasm before inspection".to_string()),
+            );
+        }
+    } else {
+        report.security_tier = SecurityTier::UnsandboxedNative;
+        report.add_warning(
+            DiagnosticCode::MOD_NATIVE_CODE,
+            "Native source mod: unsandboxed code built into the game on each player's machine".to_string(),
+            Some(CONTENT_MANIFEST.to_string()),
+            Some("Install only from authors you trust".to_string()),
+        );
+        let native = value.get("native");
+        report.compatibility.game = native.and_then(|v| str_field(v, "game"));
+        report.compatibility.horizon_revision = native.and_then(|v| str_field(v, "horizon"));
+        report.compatibility.mixins_revision = native.and_then(|v| str_field(v, "mixins"));
+
+        let src = path.join("src");
+        let has_source = src.is_dir()
+            && std::fs::read_dir(src)
+                .map(|entries| {
+                    entries.flatten().any(|entry| {
+                        entry.path().is_file()
+                            && entry.path().extension().and_then(|e| e.to_str()) == Some("rs")
+                    })
+                })
+                .unwrap_or(false);
+        if !has_source {
+            report.add_warning(
+                DiagnosticCode::NATIVE_UNEXPECTED_SOURCE,
+                "Native manifest has no Rust source under src/".to_string(),
+                Some("src/".to_string()),
+                Some("Include the source this native mod was built from".to_string()),
+            );
+        }
+    }
+
+    if description.is_none() {
+        report.add_warning(DiagnosticCode::QUALITY_MISSING_DESCRIPTION, "Manifest is missing a description".to_string(), Some(CONTENT_MANIFEST.to_string()), Some("Add a 'description' field to horizon-mod.toml to improve discovery".to_string()));
+    }
+    if authors.is_empty() {
+        report.add_warning(DiagnosticCode::QUALITY_MISSING_AUTHORS, "Manifest has no authors listed".to_string(), Some(CONTENT_MANIFEST.to_string()), Some("Add an 'authors' list to horizon-mod.toml".to_string()));
     }
 }
 

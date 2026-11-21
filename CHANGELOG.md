@@ -1,5 +1,13 @@
 # Changelog — Mod Inspector Implementation
 
+## [0.1.2] - 2026-11-21
+
+### Unpacked current-format workspaces
+- Directory inspection now reads `[wasm]` and `[native]` projects directly from `horizon-mod.toml` instead of rejecting them through the legacy strict manifest parser.
+- Wasm directories are classified `sandboxed-wasm`; native source directories are classified `unsandboxed-native` and check `src/*.rs` presence plus pinned game/Horizon/mixins revisions.
+- Legacy `mod.wasm` without `[wasm]` is still rejected, and a directory with `[wasm]` but no `mod.wasm` is an error.
+- Added integration tests for current wasm and native directory inspection.
+
 ## [0.1.1] - 2026-11-21
 
 ### Current `.hmod` code-mod support
@@ -47,14 +55,14 @@
    - While the inspector validates that `.hnmod` archives contain only permitted Rust source files and pinned git revisions, it does not perform AST/pattern-based static analysis of Rust code (e.g. checking for suspicious syscalls, raw pointer manipulations, or network socket attempts).
 2. **WASM Bytecode Decompilation**:
    - Legacy WASM files in `.hmod` are rejected on sight per current Horizon specifications. Detailed decompilation or export analysis is not performed.
-3. **Loose Directory Inspection**:
-   - Current implementation expects zipped package files. Unpacked directory workspaces (e.g. `assets/` and `data/` on disk before packaging) are not yet directly inspected without packaging.
+3. **Directory / Workspace Inspection Depth**:
+   - Directories are inspected, including current `[wasm]`/`[native]` workspaces, but content files are validated only where the engine's directory reader supports them. Archive-only defenses (raw duplicate scanning, size budgets) still require packaging.
 4. **Remote Registry Index Cross-Verification**:
    - The inspector checks packages locally. It does not yet query live remote HTTP registries or revocation lists (`revoked.toml`) over the network (designed offline-first).
 
 ### Recommended Next Steps for Phase 2
-1. **Directory / Workspace Inspection Mode**:
-   - Add support for `horizon-inspect <dir>` to inspect source workspaces before building packages.
+1. **Deeper Workspace Inspection**:
+   - Extend archive-grade duplicate and size checks to unpacked directories, and validate built wasm imports/exports before packaging.
 2. **Offline Revocation List Mirror**:
    - Add optional `--revocation-list <revoked.toml>` or embedded revocation cache to check against known taken-down hashes.
 3. **Ecosystem API Integration**:

@@ -11,10 +11,12 @@ Independent package inspection, validation, and security analysis engine for the
 - **Offline-First & Standalone**: Operates locally without external network dependencies.
 - **Multi-Format Support**:
   - Content Mods (`.hmod`)
-  - Native Mods (`.hnmod`)
+  - Current WebAssembly and native source code mods (`.hmod` with `[wasm]` or `[native]`)
+  - Legacy native bundles (`.hnmod`)
   - Modpacks (`.hpack`)
   - Horizon Shaders (`.hshader`)
   - Minecraft Resource Packs (`.zip`)
+  - Unpacked mod workspaces (directories)
 - **Zero Code Execution**: Statically inspects package structure, manifests, and metadata. Never loads or executes mod code during inspection.
 - **Security Tier Classification**:
   - Explicitly tags native mods (`.hnmod`) as **unsandboxed executable code** running with full OS account permissions.
