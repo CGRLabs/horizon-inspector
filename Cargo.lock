@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "horizon-inspector"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "horizon-mods",
  "horizon-shader-api",

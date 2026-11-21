@@ -1,6 +1,6 @@
 [package]
 name = "horizon-inspector"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Inspection, validation, and security analysis engine for Horizon mod packages"
 authors = ["CGRLabs"]

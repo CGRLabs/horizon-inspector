@@ -1,28 +1,118 @@
-//! Inspector for Content Mods (.hmod).
+//! Inspector for `.hmod` packages (content, WebAssembly code and native source mods).
 
 use crate::archive::SafeArchive;
 use crate::error::DiagnosticCode;
-use crate::model::InspectionReport;
+use crate::model::{InspectionReport, SecurityTier};
 use horizon_mods::index::valid_id;
 use horizon_mods::manifest::{Capability, MANIFEST, Side};
 use std::path::Path;
+
+fn str_field(value: &toml::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn string_array(value: &toml::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Identity/compatibility fields shared by wasm and native code mods.
+///
+/// The old `horizon_mods::Manifest` parser this crate depends on predates the
+/// `[wasm]` and `[native]` tables, so code mods are read directly from the
+/// TOML value instead of being rejected as unknown schema fields.
+fn inspect_code_manifest(
+    value: &toml::Value,
+    archive: &SafeArchive,
+    report: &mut InspectionReport,
+    is_wasm: bool,
+) {
+    let id = str_field(value, "id").unwrap_or_default();
+    let name = str_field(value, "name").unwrap_or_default();
+    let version = str_field(value, "version").unwrap_or_default();
+    let description = str_field(value, "description").filter(|s| !s.is_empty());
+    let authors = string_array(value, "authors");
+    let api = str_field(value, "api");
+    let side = str_field(value, "side").unwrap_or_else(|| "both".to_string());
+
+    report.identity.id = (!id.is_empty()).then_some(id.clone());
+    report.identity.name = (!name.is_empty()).then_some(name);
+    report.identity.version = (!version.is_empty()).then_some(version);
+    report.identity.description = description.clone();
+    report.identity.authors = authors.clone();
+    report.compatibility.api = api;
+    report.compatibility.side = Some(side);
+    report.capabilities = string_array(value, "capabilities");
+
+    if !valid_id(&id) {
+        report.add_error(
+            DiagnosticCode::MANIFEST_INVALID_ID,
+            format!("Mod ID '{id}' is invalid: must match [a-z0-9_]{{1,64}}"),
+            Some(MANIFEST.to_string()),
+            Some("Use only lowercase alphanumeric characters and underscores (1-64 characters)".to_string()),
+        );
+    }
+
+    if is_wasm {
+        if !archive.entries.contains_key("mod.wasm") {
+            report.add_error(
+                DiagnosticCode::MANIFEST_INVALID_SCHEMA,
+                "Manifest declares [wasm] but the package has no mod.wasm",
+                Some("mod.wasm".to_string()),
+                Some("Run cargo horizon-mod build --wasm before packaging".to_string()),
+            );
+        }
+    } else {
+        let native = value.get("native");
+        report.compatibility.game = native.and_then(|v| str_field(v, "game"));
+        report.compatibility.horizon_revision = native.and_then(|v| str_field(v, "horizon"));
+        report.compatibility.mixins_revision = native.and_then(|v| str_field(v, "mixins"));
+
+        let has_source = archive
+            .entries
+            .keys()
+            .any(|k| k.starts_with("src/") && k.ends_with(".rs"));
+        if !has_source {
+            report.add_warning(
+                DiagnosticCode::NATIVE_UNEXPECTED_SOURCE,
+                "Native manifest has no Rust source under src/",
+                Some("src/".to_string()),
+                Some("Include the source this native mod was built from".to_string()),
+            );
+        }
+    }
+
+    if description.is_none() {
+        report.add_warning(
+            DiagnosticCode::QUALITY_MISSING_DESCRIPTION,
+            "Manifest is missing a description",
+            Some(MANIFEST.to_string()),
+            Some("Add a 'description' field to horizon-mod.toml to improve discovery".to_string()),
+        );
+    }
+    if authors.is_empty() {
+        report.add_warning(
+            DiagnosticCode::QUALITY_MISSING_AUTHORS,
+            "Manifest has no authors listed",
+            Some(MANIFEST.to_string()),
+            Some("Add an 'authors' list to horizon-mod.toml".to_string()),
+        );
+    }
+}
 
 pub fn inspect_content_mod(
     path: &Path,
     archive: &SafeArchive,
     report: &mut InspectionReport,
 ) {
-    // 1. Check for disallowance of WASM code
-    if archive.entries.contains_key("mod.wasm") {
-        report.add_error(
-            DiagnosticCode::SEC_WASM_DISALLOWED,
-            "Package contains 'mod.wasm'. Horizon no longer runs WebAssembly code mods; content mods must contain data and assets only. Code mods must be native mods (.hnmod).",
-            Some("mod.wasm".to_string()),
-            Some("Remove mod.wasm or convert the project into a native mod (.hnmod)".to_string()),
-        );
-    }
-
-    // 2. Locate and parse horizon-mod.toml
+    // 1. Locate and parse horizon-mod.toml
     let manifest_bytes = match archive.get_file(MANIFEST) {
         Some(b) => b,
         None => {
@@ -49,6 +139,67 @@ pub fn inspect_content_mod(
         }
     };
 
+    let manifest_value = match toml::from_str::<toml::Value>(manifest_text) {
+        Ok(v) => v,
+        Err(e) => {
+            report.add_error(
+                DiagnosticCode::MANIFEST_SYNTAX_ERROR,
+                format!("Failed to parse {MANIFEST}: {e}"),
+                Some(MANIFEST.to_string()),
+                Some("Fix manifest TOML syntax and schema attributes".to_string()),
+            );
+            return;
+        }
+    };
+
+    let has_wasm_table = manifest_value.get("wasm").is_some();
+    let has_native_table = manifest_value.get("native").is_some();
+    let has_wasm_binary = archive.entries.contains_key("mod.wasm");
+
+    // A wasm binary without a [wasm] table is the discontinued legacy format.
+    if has_wasm_binary && !has_wasm_table {
+        report.add_error(
+            DiagnosticCode::SEC_WASM_DISALLOWED,
+            "Package contains a legacy 'mod.wasm' without a [wasm] manifest table. Current WebAssembly mods must declare [wasm].",
+            Some("mod.wasm".to_string()),
+            Some("Rebuild with cargo horizon-mod build --wasm on the current SDK".to_string()),
+        );
+        return;
+    }
+
+    if has_wasm_table && has_native_table {
+        report.add_error(
+            DiagnosticCode::MANIFEST_INVALID_SCHEMA,
+            "Manifest declares both [wasm] and [native]; a package may carry only one code kind",
+            Some(MANIFEST.to_string()),
+            Some("Remove one of the two tables".to_string()),
+        );
+        return;
+    }
+
+    if has_wasm_table || has_native_table {
+        if has_wasm_table {
+            report.security_tier = SecurityTier::SandboxedWasm;
+            report.add_info(
+                DiagnosticCode::MOD_WASM_CODE,
+                "WebAssembly code mod: executable wasm runs inside Horizon's sandbox",
+                Some("mod.wasm".to_string()),
+                None,
+            );
+        } else {
+            report.security_tier = SecurityTier::UnsandboxedNative;
+            report.add_warning(
+                DiagnosticCode::MOD_NATIVE_CODE,
+                "Native source mod: unsandboxed code built into the game on each player's machine",
+                Some(MANIFEST.to_string()),
+                Some("Install only from authors you trust".to_string()),
+            );
+        }
+        inspect_code_manifest(&manifest_value, archive, report, has_wasm_table);
+        return;
+    }
+
+    // Pure content mod path: use the engine's own strict manifest/content validation.
     let manifest = match horizon_mods::Manifest::parse(manifest_text) {
         Ok(m) => m,
         Err(e) => {

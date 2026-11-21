@@ -18,7 +18,7 @@ Independent package inspection, validation, and security analysis engine for the
 - **Zero Code Execution**: Statically inspects package structure, manifests, and metadata. Never loads or executes mod code during inspection.
 - **Security Tier Classification**:
   - Explicitly tags native mods (`.hnmod`) as **unsandboxed executable code** running with full OS account permissions.
-  - Verifies content mods (`.hmod`) are purely sandboxed data/assets, rejecting discontinued WebAssembly binaries (`mod.wasm`).
+  - Inspects `.hmod` content, WebAssembly code and native source mods; rejects legacy `mod.wasm` packages that lack a current `[wasm]` manifest table.
 - **Archive Defense**:
   - Defends against Zip-Slip path traversal attacks (`..`, absolute paths, colon drives).
   - Enforces entry count and expansion limits (prevents zip bomb attacks).
@@ -152,7 +152,9 @@ fn main() {
 | Code | Severity | Description |
 |------|----------|-------------|
 | `SEC_UNSANDBOXED_NATIVE` | Warning | Notice that native mod contains unsandboxed executable code. |
-| `SEC_WASM_DISALLOWED` | Error | Legacy WebAssembly `mod.wasm` detected in content mod. |
+| `SEC_WASM_DISALLOWED` | Error | Legacy `mod.wasm` detected without a current `[wasm]` manifest table. |
+| `MOD_WASM_CODE` | Info | Current WebAssembly code mod; executable wasm runs in Horizon's sandbox. |
+| `MOD_NATIVE_CODE` | Warning | Current native source `.hmod`; unsandboxed code built by each player. |
 | `ARCHIVE_ZIP_SLIP` | Error | Path traversal element (`..`) detected in archive entry. |
 | `ARCHIVE_INVALID_PATH` | Error | Absolute path, backslash, colon, or illegal character in entry. |
 | `ARCHIVE_EXPANSION_LIMIT`| Error | Archive expansion exceeds safe threshold (256 MiB). |

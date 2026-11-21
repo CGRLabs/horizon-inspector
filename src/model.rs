@@ -62,6 +62,8 @@ impl PackageKind {
 pub enum SecurityTier {
     /// Content mod: purely assets and data, zero executable code. Sandboxed.
     SandboxedContent,
+    /// WebAssembly code mod: executable wasm running in Horizon's sandbox with budgets.
+    SandboxedWasm,
     /// Native mod: C/Rust mixin code running with full user OS privileges. Unsandboxed.
     UnsandboxedNative,
     /// Modpack: metadata collection pinning signed/hashed mod entries and text overrides.
@@ -78,6 +80,7 @@ impl SecurityTier {
     pub fn description(&self) -> &'static str {
         match self {
             SecurityTier::SandboxedContent => "SANDBOXED: Data and assets only, no executable code.",
+            SecurityTier::SandboxedWasm => "SANDBOXED: WebAssembly code with time and memory budgets.",
             SecurityTier::UnsandboxedNative => "HIGH RISK: Unsandboxed native code executing with full user privileges.",
             SecurityTier::ConfigurationOnly => "LOW RISK: Declarative modpack specification and configuration files.",
             SecurityTier::VisualShader => "CONTROLLED: WGSL shader pack verified against graphics pipeline stages.",

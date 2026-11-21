@@ -1,5 +1,12 @@
 # Changelog — Mod Inspector Implementation
 
+## [0.1.1] - 2026-11-21
+
+### Current `.hmod` code-mod support
+- WebAssembly `.hmod` packages with a `[wasm]` manifest table are now accepted as `sandboxed-wasm` instead of being rejected as the discontinued legacy format. Legacy `mod.wasm` without `[wasm]` is still rejected.
+- Native source `.hmod` packages with a `[native]` table are accepted and classified `unsandboxed-native`, with pins and source presence checked.
+- Added `MOD_WASM_CODE` and `MOD_NATIVE_CODE` diagnostics and updated the JSON schema, README and integration tests.
+
 ## [0.1.0] - 2026-10-31
 
 ### Initial MVP Delivery

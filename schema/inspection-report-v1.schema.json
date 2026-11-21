@@ -38,6 +38,7 @@
       "type": "string",
       "enum": [
         "sandboxed-content",
+        "sandboxed-wasm",
         "unsandboxed-native",
         "configuration-only",
         "visual-shader",

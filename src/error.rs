@@ -33,6 +33,8 @@ impl DiagnosticCode {
     pub const SEC_UNSANDBOXED_NATIVE: &'static str = "SEC_UNSANDBOXED_NATIVE";
     pub const SEC_WASM_DISALLOWED: &'static str = "SEC_WASM_DISALLOWED";
     pub const SEC_UNEXPECTED_EXECUTABLE: &'static str = "SEC_UNEXPECTED_EXECUTABLE";
+    pub const MOD_WASM_CODE: &'static str = "MOD_WASM_CODE";
+    pub const MOD_NATIVE_CODE: &'static str = "MOD_NATIVE_CODE";
 
     // Native mod specific
     pub const NATIVE_REVISION_INVALID: &'static str = "NATIVE_REVISION_INVALID";

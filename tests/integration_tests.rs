@@ -93,6 +93,69 @@ fn test_inspect_official_wasm_hmod_rejected() {
     );
 }
 
+#[test]
+fn test_inspect_current_wasm_hmod_accepted() {
+    let manifest = r#"
+id = "wasm_demo"
+name = "Wasm Demo"
+version = "1.0.0"
+description = "A current sandboxed code mod"
+authors = ["CGRLabs"]
+api = "0.2"
+capabilities = ["registries"]
+
+[wasm]
+sha512 = "00"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
+"#;
+    let path = create_test_package_with_ext(
+        "hmod",
+        &[("horizon-mod.toml", manifest.as_bytes()), ("mod.wasm", b"wasm")],
+    );
+    let report = inspect_package(&path, &InspectorConfig::default());
+
+    assert_eq!(report.package_kind, PackageKind::ContentMod);
+    assert_eq!(report.security_tier, SecurityTier::SandboxedWasm);
+    assert!(report.is_valid, "current wasm hmod must pass: {:?}", report.diagnostics);
+    assert!(report.diagnostics.iter().any(|d| d.code == DiagnosticCode::MOD_WASM_CODE));
+    assert!(!report.diagnostics.iter().any(|d| d.code == DiagnosticCode::SEC_WASM_DISALLOWED));
+    assert_eq!(report.identity.id.as_deref(), Some("wasm_demo"));
+}
+
+#[test]
+fn test_inspect_current_native_hmod_accepted() {
+    let manifest = r#"
+id = "native_demo"
+name = "Native Demo"
+version = "1.0.0"
+description = "A current native source mod"
+authors = ["CGRLabs"]
+api = "0.2"
+side = "client"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
+"#;
+    let path = create_test_package_with_ext(
+        "hmod",
+        &[("horizon-mod.toml", manifest.as_bytes()), ("src/lib.rs", b"fn main() {}")],
+    );
+    let report = inspect_package(&path, &InspectorConfig::default());
+
+    assert_eq!(report.package_kind, PackageKind::ContentMod);
+    assert_eq!(report.security_tier, SecurityTier::UnsandboxedNative);
+    assert!(report.is_valid, "current native hmod must pass: {:?}", report.diagnostics);
+    assert!(report.diagnostics.iter().any(|d| d.code == DiagnosticCode::MOD_NATIVE_CODE));
+    assert_eq!(
+        report.compatibility.horizon_revision.as_deref(),
+        Some("0b14f8acfd97fa2c750e42795249dcc981178ca4")
+    );
+    assert_eq!(report.identity.id.as_deref(), Some("native_demo"));
+}
+
 // -----------------------------------------------------------------------------
 // 2. Valid Content Mod (.hmod) test
 // -----------------------------------------------------------------------------
